@@ -3,6 +3,16 @@
 A small self contained python wrapper to aid in running a Minecraft server
 instance.
 
+This script is designed to run on on top of many versions of Minecraft thus
+providing the same functionality to both modded and vanilla mc installations.
+
+While other versions are expected to work it has been tested with:
+
+* Forge for mc1.7.10
+* mc1.8.3-1.8.7
+* mc1.9.* with and without forge
+* mc1.10.* with and without forge
+
 ## Features
 
 * Curses interface, while very bare bones this allows typing a command outside
