@@ -864,7 +864,13 @@ class SDiscordRelay(threading.Thread):
                 m ="<" + message.author.name + "> "
                 m+=self._substitute_members(message.content)
                 if(self.mc.minecraft is not None):
-                    self.mc.minecraft.sendLine("/say discord " + m)
+                    firstline=True
+                    for section in m.split('\n'):
+                        if(firstline):
+                            self.mc.minecraft.sendLine("/say discord " + section)
+                            firstline=False
+                        else:
+                            self.mc.minecraft.sendLine("/say discord  | " + section)
     
     def _substitute_members(self,mesg):
         while True:
