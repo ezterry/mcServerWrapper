@@ -444,6 +444,13 @@ class mc_system:
         elif(ln.strip() == "!!backup"):
             e=self.sched.enter(1,4,self.runBackup)
             self.pushQueue("backup_proc",e)
+        elif(ln.strip() == "!!fixdiscord"):
+            if(discord_token != ""):
+                if(self.discord is not None):
+                    self.discord.safe_shutdown()
+                    self.discord = None
+                self.discord = SDiscordRelay(self)
+                self.discord.start()
         elif(ln.strip().startswith("!!perms")):
             self.permsCmds(ln.strip()[8:].strip())
         elif(self.minecraft is not None):
