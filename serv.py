@@ -275,13 +275,13 @@ class mc_system:
         if(m is not None and self.discord is not None):
             if(m.group(1).lower() == "server" and m.group(2).lower().startswith("discord")):
                 pass
-            else:
+            elif(self.discord is not None):
                 self.discord.relay("* **" + m.group(1) + "**  " + m.group(2))
         m = re.search(r'^[\[\<](.+?)[\]\>]\s(.*)$',msg)
         if(m is not None):
             if(m.group(1).lower() == "server" and m.group(2).lower().startswith("discord")):
                 pass
-            else:
+            elif(self.discord is not None):
                 self.discord.relay("<**" +m.group(1) + "**> " + m.group(2))
 
         #relay achievements
@@ -290,7 +290,7 @@ class mc_system:
             parsedUserMessage=True
             user=self.removeGroupColor(m.group(1))
             achievement = m.group(2)
-            if(user in self.onlineusers):
+            if(user in self.onlineusers and self.discord is not None):
                 self.discord.relay("**" + user + "** has earned the achievement: __" + achievement + "__")
 
         #relay basic death messages to discord
@@ -302,7 +302,7 @@ class mc_system:
                 note=self.removeGroupColor(m.group(2))
                 if(note.startswith("lost connection")):
                    pass
-                elif(user in self.onlineusers):
+                elif(user in self.onlineusers and self.discord is not None):
                    if(note.find("[") == -1 and note.find("{") == -1):
                        self.discord.relay("**" + user + "** " + note)
 
