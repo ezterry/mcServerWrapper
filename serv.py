@@ -35,17 +35,17 @@ discord_channel = "000"
 
 def readConfig():
     parser = configparser.ConfigParser()
-    
+
     if(os.path.isfile("serv.py.ini")):
         parser.read('serv.py.ini')
-    
+
     def getValue(section, name, default):
         if(section not in parser):
             parser[section]={}
         if(name not in parser[section]):
             parser[section][name]=default
         return(parser[section][name])
-        
+
     def getIntValue(section, name, default):
         try:
             return int(getValue(section,name,str(default)))
@@ -54,22 +54,22 @@ def readConfig():
             print("using default value: " + str(default))
             parser[section][name]=str(default)
             return default
-    
+
     globals()["mc_jvm"] = getValue("java","exec",mc_jvm)
     globals()["mc_jar"] = getValue("java","jar",mc_jar)
-    
+
     globals()["backup_dir"] = getValue("backups","directory",backup_dir)
     globals()["backup_interval"] = getIntValue("backups","interval mins",backup_interval)
     globals()["backup_count"] = getIntValue("backups","count",backup_count)
-    
+
     globals()["world_name"] = getValue("misc","world name",world_name)
     globals()["max_lines_buf"] = getIntValue("misc","text buffer",max_lines_buf)
-    
+
     globals()["server_args"] = json.loads(getValue("misc","args",json.dumps(server_args)))
-    
+
     globals()["discord_token"] = getValue("discord","token",discord_token)
     globals()["discord_channel"] = getValue("discord","channel id",discord_channel)
-    
+
     with open('serv.py.ini','w') as fp:
         parser.write(fp)
 
@@ -78,13 +78,14 @@ class mc_system:
         self.screen = screen
         screen.nodelay(True)
         (self.height,self.width) = screen.getmaxyx()
-        
+
         self.outputscr=curses.newwin(self.height - 4,self.width,0,0)
         self.statusscr=curses.newwin(3,self.width,self.height-4,0)
         self.inputscr=curses.newwin(1,self.width,self.height-1,0)
-        
+
         self.sched=sched.scheduler(time.time, time.sleep)
-        self.inputbuff = ""
+        self.inputbuff = [""]
+        self.inputbuffIdx = 0
         self.histbuff = []
         self.pos = 0
         self.shuttingdown = False
@@ -99,7 +100,7 @@ class mc_system:
         self.currentpid=None
         self.discord = None
         self.onlineusers = []
-        
+
     def run(self):
         self.itert=0
         self.sched.enter(0.1,5,self.frame)
@@ -110,12 +111,12 @@ class mc_system:
             self.discord = SDiscordRelay(self)
             self.discord.start()
         self.sched.run(self)
-        
-   
+
+
     def pushQueue(self,type,event):
         """push an event to the future queue"""
         self.inqueue.append([type,event])
-        
+
     def popQueue(self,type):
         newqueue = []
         for nm,e in self.inqueue:
@@ -127,7 +128,7 @@ class mc_system:
             else:
                 newqueue.append([nm,e])
         self.inqueue=newqueue
-      
+
     def startMC(self):
         #clean queue
         self.popQueue("minecraft")
@@ -135,7 +136,7 @@ class mc_system:
             self.appendLine("Error minecraft is already running")
             return
         self.autorestart = False
-        
+
         #create the full server command
         server_cmd=[]
         server_cmd.append(mc_jvm)
@@ -143,7 +144,7 @@ class mc_system:
         server_cmd.append("-jar")
         server_cmd.append(mc_jar)
         server_cmd.append("nogui")
-        
+
         self.subproc.append(SSubProc(server_cmd,self.sched,
                                 self.gameOutput,
                                 self.minecraftShutdown))
@@ -162,9 +163,9 @@ class mc_system:
             except:
                 pass
         self.sched.enter(0.2,1,echopid)
-        
+
     def minecraftShutdown(self,proc):
-    
+
         self.appendLine("Minecraft terminated")
         self.subproc.remove(proc)
         self.minecraft = None
@@ -173,8 +174,8 @@ class mc_system:
         if(self.autorestart and not self.shuttingdown):
             self.autorestart = False
             e=self.sched.enter(10,1,self.startMC)
-            self.pushQueue("minecraft",e)            
-    
+            self.pushQueue("minecraft",e)
+
     def enableAutoRestart(self):
         self.popQueue("autorestart")
         if(self.minecraft is None):
@@ -185,7 +186,7 @@ class mc_system:
             return
         self.autorestart = True
         self.appendLine("Auto Restart Enabled")
-        
+
     def removeGroupColor(self,name):
         #removes a group color codes from a player name
         text = name.split(chr(167))
@@ -193,7 +194,7 @@ class mc_system:
         for part in text:
             name+=part[1:]
         return name
-        
+
     def gameOutput(self,proc,line):
         if(len(line) == 0):
             return
@@ -243,7 +244,7 @@ class mc_system:
             if(args is None):
                 args = ""
             self.runInGameCommand(time,self.removeGroupColor(m.group(1)),m.group(2),args)
-        
+
         #whitelist updates
         m = re.search(r'^Removed ([^\s+]+) from the whitelist$',msg)
         if(m is not None):
@@ -293,6 +294,15 @@ class mc_system:
             if(user in self.onlineusers and self.discord is not None):
                 self.discord.relay("**" + user + "** has earned the achievement: __" + achievement + "__")
 
+        #relay 1.12 advancements
+        m = re.search(r'^([^\s+]+)\shas made the advancement \[(.*?)\]$', msg)
+        if(m is not None):
+            parsedUserMessage=True
+            user=self.removeGroupColor(m.group(1))
+            achievement = m.group(2)
+            if(user in self.onlineusers and self.discord is not None):
+                self.discord.relay("**" + user + "** has made the advancement: __" + achievement + "__")
+
         #relay basic death messages to discord
         if(not parsedUserMessage):
             m = re.search(r'^([^\s+]+)\s(.*)$',msg)
@@ -330,7 +340,7 @@ class mc_system:
                 self.minecraft.sendLine("msg " + user + " usage: '/me !!whitelist <add|remove> <player>' to edit the whitelist")
                 self.minecraft.sendLine("msg " + user + " usage: '/me !!whitelist <list>' to list the current whitelist")
             return
-        
+
         if(commandName == "kick"):
             if(not self.perms.checkPerm(user,"kick")):
                 self.minecraft.sendLine("say " + user + ": you do not have permission to kick another player")
@@ -343,7 +353,7 @@ class mc_system:
                     self.minecraft.sendLine("kick " + player)
                 else:
                     self.minecraft.sendLine("kick " + player + " " + reason.strip())
-                    
+
         if(commandName == "help"):
             if(self.perms.checkPerm(user,"whitelist")):
                 self.minecraft.sendLine("msg " + user + " usage: '/me !!whitelist <add|remove> <player>' to edit the whitelist")
@@ -351,7 +361,7 @@ class mc_system:
             if(self.perms.checkPerm(user,"kick")):
                 self.minecraft.sendLine("msg " + user + " usage: '/me !!kick <player> [reason]' kick the player")
             self.minecraft.sendLine("msg " + user + " usage: '/me !!help' shows this help message")
-        
+
     def updateBuffer(self):
         h = self.height - 5
         i=0
@@ -375,7 +385,7 @@ class mc_system:
                     raise(Exception("error working on: " + str(i) + "||" + ln + " " + str(self.height)))
                 i-=1
         self.outputscr.refresh()
-        
+
     def updateStatus(self):
         self.statusscr.clear()
         self.statusscr.hline(0,0,ord('-'),self.width)
@@ -386,15 +396,15 @@ class mc_system:
                   world_name + " (" + str(self.currentpid) + ")")
         self.statusscr.hline(2,0,ord('-'),self.width)
         self.statusscr.refresh()
-        
+
     def updateInput(self):
         self.inputscr.clear()
-        curbuff=self.inputbuff
+        curbuff=self.inputbuff[self.inputbuffIdx]
         if(len(curbuff)>=self.width):
             curbuff="..." + curbuff[(-1 * (self.width - 4)):]
         self.inputscr.addstr(0,0,curbuff)
         self.inputscr.refresh()
-    
+
     def appendLine(self,ln):
         self.updatescreen=True
         if(len(ln) >= (self.width)):
@@ -404,19 +414,19 @@ class mc_system:
         if(len(self.histbuff)+1 > max_lines_buf):
             self.histbuff.pop(0)
         self.histbuff.append(ln)
-    
+
     def appendLineThreadsafe(self,ln):
         def push():
             for l in ln.split('\n'):
                 self.appendLine(l)
         self.sched.enter(0.01,6,push)
-        
+
     def processUserCmd(self,ln):
         self.appendLine(ln)
         if(ln.strip() == "!!stop"):
             self.shuttingdown=True
             if(self.minecraft is not None):
-                self.appendLine("Shutting down MC: pid=" + 
+                self.appendLine("Shutting down MC: pid=" +
                            str(self.minecraft.getServerPid()))
                 self.minecraft.sendLine("stop")
             #clear queue
@@ -430,7 +440,7 @@ class mc_system:
         elif(ln.strip() == "!!date"):
             def date_stop(proc):
                 self.subproc.remove(proc)
-                
+
             self.subproc.append(SSubProc(["date",],self.sched,
                                 lambda x,y: self.appendLine("@: " + y),
                                 date_stop))
@@ -455,8 +465,8 @@ class mc_system:
             self.permsCmds(ln.strip()[8:].strip())
         elif(self.minecraft is not None):
             self.minecraft.sendLine(ln)
-        
-    
+
+
     def permsCmds(self,s):
         args = s.split(" ")
         if(len(args) == 0 or args[0]=="help" or args[0]==""):
@@ -465,7 +475,7 @@ class mc_system:
             self.appendLine("  !!perm add <permission> <user> - give user the permission")
             self.appendLine("  !!perm del <permission> <user> - remove a permission form a user")
             self.appendLine("")
-            self.appendLine("Current available permissions: " + 
+            self.appendLine("Current available permissions: " +
                             str(self.perms.valid_perm))
         elif(args[0]=="list"):
             try:
@@ -480,7 +490,7 @@ class mc_system:
             else:
                 try:
                     self.perms.addPerm(args[2],args[1])
-                    self.appendLine("User: " + args[2] + "has been granted " + 
+                    self.appendLine("User: " + args[2] + "has been granted " +
                                     args[1])
                 except ValueError:
                     self.appendLine("User " + args[2] + " not found")
@@ -493,6 +503,7 @@ class mc_system:
                 self.appendLine("User " + args[2] + " not found")
         else:
             self.appendLine("Unknown permission command, please run '!!perms help'")
+
     def frame(self):
         #check resize:
         (nheight,nwidth) = self.screen.getmaxyx()
@@ -503,9 +514,9 @@ class mc_system:
             self.outputscr=curses.newwin(self.height - 4,self.width,0,0)
             self.statusscr=curses.newwin(3,self.width,self.height-4,0)
             self.inputscr=curses.newwin(1,self.width,self.height-1,0)
-            
+
             if(len(self.histbuff) <= (self.height - 5)):
-                self.pos=0 
+                self.pos=0
             elif(len(self.histbuff) - self.pos - (self.height-5) <=0 ):
                 self.pos = len(self.histbuff) - self.height +4
             #self.updateStatus()
@@ -518,28 +529,39 @@ class mc_system:
             ch = self.screen.getch()
             while (ch != curses.ERR):
                 if(ch == 263): #backspace
-                    self.inputbuff = self.inputbuff[:-1]
+
+                    self.inputbuff[self.inputbuffIdx] = self.inputbuff[self.inputbuffIdx][:-1]
                 elif(ch == 410): #resize
                     pass
                 elif(ch == 339): #pageup
                     self.pos+=5
                     if(len(self.histbuff) <= (self.height - 5)):
-                        self.pos=0 
+                        self.pos=0
                     elif(len(self.histbuff) - self.pos - (self.height-5) <=0 ):
-                        self.pos = len(self.histbuff) - self.height +4 
+                        self.pos = len(self.histbuff) - self.height +4
                 elif(ch == 338): #pagedown
                     self.pos-=5
                     if(self.pos<0):
                         self.pos=0
-                    pass
+                elif(ch == 259): #up arrow
+                    if(self.inputbuffIdx+1 < len(self.inputbuff)):
+                        self.inputbuffIdx+=1
+                elif(ch == 258): #down arrow
+                    if(self.inputbuffIdx > 0):
+                        self.inputbuffIdx-=1
                 elif(ch == 10): #newline
-                    if(len(self.inputbuff) > 0):
-                        self.processUserCmd(self.inputbuff)
-                        self.inputbuff = ""
+                    if(len(self.inputbuff[self.inputbuffIdx]) > 0):
+                        self.processUserCmd(self.inputbuff[self.inputbuffIdx])
+                        if(self.inputbuffIdx != 0):
+                            self.inputbuff[0] = self.inputbuff[self.inputbuffIdx]
+                        self.inputbuff.insert(0,"")
+                        self.inputbuffIdx=0
+                        if(len(self.inputbuff) > 100):
+                            self.inputbuff.pop()
                 else:
                     try:
                         ch=chr(ch)
-                        self.inputbuff+=ch
+                        self.inputbuff[self.inputbuffIdx]+=ch
                     except:
                         pass
                 ch = self.screen.getch()
@@ -557,11 +579,11 @@ class mc_system:
         if(self.shuttingdown and len(self.subproc) == 0):
             return
         self.sched.enter(0.1,5,self.frame)
-        
+
     def runBackup(self):
         self.popQueue("backup_proc")
         t = time.localtime()
-        filename = (world_name + "_" + 
+        filename = (world_name + "_" +
                     str(t.tm_year).zfill(4) +
                     str(t.tm_mon).zfill(2) +
                     str(t.tm_mday).zfill(2) + "-" +
@@ -574,7 +596,7 @@ class mc_system:
             except:
                 self.appendLine("[Backup] Error with backups, backup dir does not exist and cannot be created")
                 return
-        
+
         if(not self.systemUp):
             #server must have restarted
             self.appendLine("[Backup] Backup canceled due to server state")
@@ -582,20 +604,20 @@ class mc_system:
         if(self.backupLock):
             self.appendLine("[Backup] Backup already in progress...")
             return
-        
+
         #The sub component callbacks
         #Backup step 1 (stop autosave)
         def stop_autosave():
             self.appendLine("[Backup] Disable auto save..")
             self.minecraft.sendLine("save-off")
             self.sched.enter(1,3,force_save)
-        
+
         #Backup step 2 (force a world save)
         def force_save():
             self.appendLine("[Backup] Force one last save..")
             self.minecraft.sendLine("save-all")
             self.sched.enter(2,6,mktarball)
-        
+
         #Backup step 3 (generate tarball of world save)
         def mktarball():
             self.appendLine("[Backup] Generating Tar..")
@@ -605,7 +627,7 @@ class mc_system:
             except:
                 self.appendLine("[Backup] Unable to open backup file")
                 self.minecraft.sendLine("save-on")
-            
+
             #callback when a buffer is read from tar
             def write_buffer(p,ln):
                 #self.appendLine("Writing block")
@@ -622,16 +644,16 @@ class mc_system:
                 except:
                     self.appendLine("[Backup] Error closing backupfile")
                 self.sched.enter(2,3,cleanup)
-                
+
             self.subproc.append(SSubProc(cmd,self.sched,
                                 write_buffer,
                                 close_buffer,binary=True))
             self.subproc[-1].start()
-        #Backup step 4 (Cleanup extra backup tar.gz) 
+        #Backup step 4 (Cleanup extra backup tar.gz)
         def cleanup():
             self.appendLine("[Backup] Cleanup and post backup save..")
             self.minecraft.sendLine("save-all")
-            
+
             hist = list(filter(lambda x:x.endswith(".tar.gz"),os.listdir(backup_dir)))
             hist.sort()
             while(len(hist) > backup_count):
@@ -645,16 +667,16 @@ class mc_system:
         def restorestate():
             self.minecraft.sendLine("save-on")
             self.minecraft.sendLine("say System Backup Complete")
-            
+
             e=self.sched.enter(backup_interval*60,4,self.runBackup)
             self.pushQueue("backup_proc",e)
             self.backupLock=False
-        
+
         #kick off backup steps
         self.backupLock = True
         self.minecraft.sendLine("say Starting System Backup")
         self.sched.enter(1,3, stop_autosave)
-        
+
 
 def getWhitelist():
     users=[]
@@ -663,7 +685,7 @@ def getWhitelist():
         for e in json.loads(whitelist):
             users.append(e['name'])
     return(users)
-    
+
 class scriptPerms:
     def __init__(self):
         self.valid_perm = ["whitelist","kick",]
@@ -707,7 +729,7 @@ class scriptPerms:
             if(perm in self.users[uuid]):
                 self.users[uuid].remove(perm)
         self.writePerm()
-    
+
     def lsPerm(self,user):
         uuid = self.getUUID(user)
         if(uuid is None):
@@ -717,7 +739,7 @@ class scriptPerms:
                 return(list(self.users[uuid]))
             else:
                 return([])
-        
+
     def checkPerm(self,user,perm):
         uuid = self.getUUID(user)
         if(uuid is None):
@@ -726,20 +748,20 @@ class scriptPerms:
             if(perm in self.users[uuid]):
                 return True
         return False
-    
+
     def writePerm(self):
         with open("perms_script.txt","w") as f:
             for uuid in self.users:
                 for p in self.users[uuid]:
                     f.write(str(uuid) + "," + str(p) + "\n")
-            f.flush()   
+            f.flush()
 
 class SSubProcException(Exception):
     pass
-    
+
 class SSubProc(threading.Thread):
     """Subprocess input relay thread"""
-            
+
     def __init__(self,cmd,s,input_cb=None,terminate_cb=None,binary=False):
         threading.Thread.__init__(self)
         self.procRunning = False
@@ -752,26 +774,26 @@ class SSubProc(threading.Thread):
         self.daemon = True
         self.sched = s
         self.binary = binary
-        
+
     def waitForStart(self):
         while(self.procRunning is False):
             if(self.procCompleate):
                 raise(SSubProcException("Process already complete"))
             time.sleep(0.1)
-        
+
     def getServerPid(self):
         self.waitForStart()
         return(self.procPid)
-    
+
     def getServerStdin(self):
         self.waitForStart()
         return(self.procInput)
-    
+
     def sendLine(self,ln):
         self.waitForStart()
         self.procInput.write(ln.encode("utf-8") + b"\n")
         self.procInput.flush()
-        
+
     def run(self):
         try:
             buf=160
@@ -792,7 +814,7 @@ class SSubProc(threading.Thread):
         self.procInput= p.stdin
         self.procRunning = True
         pause_read = 0
-        
+
         prio=2
         while(True):
             if(not self.binary):
@@ -813,7 +835,7 @@ class SSubProc(threading.Thread):
                     self.procCompleate=True
                     self.procRunning=False
                     break
-                    
+
             if(self.input_cb is not None):
                 self.sched.enter(0,prio,self.input_cb,argument=(self,ln,))
             prio+=1
@@ -831,12 +853,12 @@ class SDiscordRelay(threading.Thread):
         self.serverchan = None
         self.mc = par
         self.membercache = {}
-        
+
     def main(self):
         self.client = discord.Client(loop=asyncio.new_event_loop())
         asyncio.set_event_loop(self.client.loop)
         client = self.client
-        
+
         @client.event
         @asyncio.coroutine
         def on_ready():
@@ -849,7 +871,7 @@ class SDiscordRelay(threading.Thread):
                 if(discord_channel == chan.id):
                     self.mc.appendLineThreadsafe("Found " + chan.name + " channel")
                     self.serverchan=chan
-    
+
         @client.event
         @asyncio.coroutine
         def on_message(message):
@@ -859,26 +881,33 @@ class SDiscordRelay(threading.Thread):
             #message is from ourself
             if(message.author.id == self.client.user.id):
                 return
-            
-            
+
+
             #message is a request for an online list
             if(message.content.lower() == "<@" + str(self.client.user.id) + "> online"):
                 self.mc.appendLineThreadsafe('Send online users to discord')
                 self.mc.appendLineThreadsafe('Users currently online: ' + str(self.mc.onlineusers))
                 self.client.loop.call_soon(self.sendmessage,'Users currently online: ' + str(self.mc.onlineusers))
             #message needs to be relayed to minecraft
-            else:
-                m ="<" + message.author.name + "> "
-                m+=self._substitute_members(message.content)
-                if(self.mc.minecraft is not None):
-                    firstline=True
-                    for section in m.split('\n'):
-                        if(firstline):
-                            self.mc.minecraft.sendLine("/say discord " + section)
-                            firstline=False
-                        else:
-                            self.mc.minecraft.sendLine("/say discord  | " + section)
-    
+            elif(self.mc.minecraft is not None):
+                fmt = []
+                fmt.append("")
+                fmt.append({"text": "Discord <"})
+                fmt.append({"text": message.author.name,
+                            "bold": True,
+                            "color": "aqua"})
+                fmt.append({"text": "> "})
+                fmt.append({"text": self._substitute_members(message.content)})
+
+                #send to mc
+                self.mc.minecraft.sendLine("/tellraw @a " + json.dumps(fmt))
+                #send to console window
+                m  = "[" + time.strftime("%H:%M:%S") +"] "
+                m += "[Discord " + message.author.name + "] "
+                m += self._substitute_members(message.content)
+                for ln in m.split("\n"):
+                    self.mc.appendLineThreadsafe(ln)
+
     def _substitute_members(self,mesg):
         while True:
             m = re.search(r'^(.*)\<\@(\d+)\>(.*)$',mesg)
@@ -894,20 +923,20 @@ class SDiscordRelay(threading.Thread):
             else:
                 break
         return mesg
-        
+
     def _cache_members(self):
         #load members
         for member in self.client.get_all_members():
             self.membercache[member.id] = member.name
-            
+
     def shutdown(self):
         self.running=False
         self.client.loop.create_task(self.client.close())
         #self.client.loop.stop()
-    
+
     def sendmessage(self,m):
         self.client.loop.create_task(self.client.send_message(self.serverchan,m))
-        
+
     def relay(self,s):
         #relay s to discord
         if(self.running and self.serverchan is not None):
@@ -917,14 +946,14 @@ class SDiscordRelay(threading.Thread):
                 s+=part[1:]
             #clean up message here
             self.client.loop.call_soon_threadsafe(self.sendmessage,s)
-   
+
     def safe_shutdown(self):
         if(self.client is not None):
             self.client.loop.call_soon_threadsafe(self.shutdown)
-        
+
     def run(self):
         self.mc.appendLineThreadsafe("run discord")
-        
+
         try:
             self.running = False
             self.main()
@@ -933,10 +962,10 @@ class SDiscordRelay(threading.Thread):
             if(self.running):
                 self.mc.appendLineThreadsafe("error: " + str(e))
                 self.mc.appendLineThreadsafe(traceback.format_exc())
-        
+
 def main(scr):
     mc_system(scr).run()
-            
+
 if(__name__=='__main__'):
     locale.setlocale(locale.LC_ALL, '')
     code = locale.getpreferredencoding()
