@@ -859,22 +859,26 @@ class SDiscordRelay(threading.Thread):
         asyncio.set_event_loop(self.client.loop)
         client = self.client
 
-        @client.event
-        @asyncio.coroutine
-        def on_ready():
+        
+        async def on_ready():
             self.mc.appendLineThreadsafe('Logged in as')
             self.mc.appendLineThreadsafe(self.client.user.name)
             self.mc.appendLineThreadsafe('------')
             self.running = True
             for chan in self.client.get_all_channels():
-                self.mc.appendLineThreadsafe(chan.name + " - " + chan.id)
-                if(discord_channel == chan.id):
-                    self.mc.appendLineThreadsafe("Found " + chan.name + " channel")
-                    self.serverchan=chan
+                try:
+                    self.mc.appendLineThreadsafe('** Channel:')
+                    self.mc.appendLineThreadsafe(chan.name + " - " + str(chan.id))
+                    if(str(discord_channel) == str(chan.id)):
+                        self.mc.appendLineThreadsafe("Found " + chan.name + " channel")
+                        self.serverchan=chan
+                except Exception as e:
+                    self.mc.appendLineThreadsafe('Error ' + str(e))
+            self.mc.appendLineThreadsafe('------')
 
-        @client.event
-        @asyncio.coroutine
-        def on_message(message):
+        client.on_ready = on_ready
+
+        async def on_message(message):
             #message is not on our primary channel
             if(message.channel.id != self.serverchan.id):
                 return
@@ -907,6 +911,8 @@ class SDiscordRelay(threading.Thread):
                 m += self._substitute_members(message.content)
                 for ln in m.split("\n"):
                     self.mc.appendLineThreadsafe(ln)
+        client.on_message = on_message
+        self.mc.appendLineThreadsafe("discord client created")
 
     def _substitute_members(self,mesg):
         while True:
@@ -935,7 +941,11 @@ class SDiscordRelay(threading.Thread):
         #self.client.loop.stop()
 
     def sendmessage(self,m):
-        self.client.loop.create_task(self.client.send_message(self.serverchan,m))
+        try:
+            self.client.loop.create_task(self.serverchan.send(m))
+        except Exception as e:
+            self.mc.appendLineThreadsafe("Error sending message to discord: " + str(e))
+            self.mc.appendLineThreadsafe("Original Message: " + m)
 
     def relay(self,s):
         #relay s to discord
@@ -958,6 +968,7 @@ class SDiscordRelay(threading.Thread):
             self.running = False
             self.main()
             self.client.loop.run_until_complete(self.client.start(discord_token))
+            self.mc.appendLineThreadsafe("discord done!?!")
         except Exception as e:
             if(self.running):
                 self.mc.appendLineThreadsafe("error: " + str(e))
